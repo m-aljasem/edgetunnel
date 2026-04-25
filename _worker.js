@@ -1,8 +1,5 @@
 ﻿const Version = '2026-04-17 01:57:56';
-/*In our project workflow, we first*/ import //the necessary modules, 
-/*then*/ { connect }//to the central server, 
-/*and all data flows*/ from//this single source.
-	'cloudflare\u003asockets';
+import { connect } from 'cloudflare:sockets';
 let config_JSON, proxyIP = '', enableSocks5Proxy = null, enableSocks5GlobalProxy = false, mySocks5Account = '', parsedSocks5Address = {};
 let cachedProxyIP, cachedProxyResolutionArray, cachedProxyArrayIndex = 0, enableProxyFallback = true, debugLogPrint = false;
 let SOCKS5whitelist = ['*tapecontent.net', '*cloudatacdn.com', '*loadshare.org', '*cdn-centaurus.com', 'scholar.google.com'];
@@ -997,7 +994,7 @@ async function handleWsRequest(request, yourUUID, url) {
 	let isTrojan = null;
 	const trojanUdpContext = { cache: new Uint8Array(0) };
 	const earlyDataHeader = request.headers.get('sec-websocket-protocol') || '';
-	const SSmode disables EarlyData = !!url.searchParams.get('enc');
+	const ssModeDisablesEarlyData = !!url.searchParams.get('enc');
 	let readCancelled = false;
 	let readableStreamEnded = false;
 	const readable = new ReadableStream({
@@ -1046,7 +1043,7 @@ async function handleWsRequest(request, yourUUID, url) {
 			});
 
 			// SS disabledInMode sec-websocket-protocol early-data，avoidSubprotocolValue（like "binary"）mistakenly base64 dataInjectionFirstPacketCause AEAD decryptFailed。
-			if (SSmode disables EarlyData || !earlyDataHeader) return;
+			if (ssModeDisablesEarlyData || !earlyDataHeader) return;
 			try {
 				const binaryString = atob(earlyDataHeader.replace(/-/g, '+').replace(/_/g, '/'));
 				const bytes = new Uint8Array(binaryString.length);
@@ -1105,7 +1102,7 @@ async function handleWsRequest(request, yourUUID, url) {
 				const inboundCandidateEncryptConfig = [preferredEncryptConfig, ...Object.values(SSSupportEncryptConfig).filter(c => c.method !== preferredEncryptConfig.method)];
 				const inboundMasterKeyTaskCache = new Map();
 				const getInboundMasterKeyTask = (config) => {
-					if (!inboundMasterKeyTaskCache.has(config.method)) inboundMasterKeyTaskCache.set(config.method, SSDerive master key(yourUUID, config.keyLen));
+					if (!inboundMasterKeyTaskCache.has(config.method)) inboundMasterKeyTaskCache.set(config.method, ssDeriveMasterKey(yourUUID, config.keyLen));
 					return inboundMasterKeyTaskCache.get(config.method);
 				};
 				const inboundStatus = {
@@ -1128,7 +1125,7 @@ async function handleWsRequest(request, yourUUID, url) {
 							const salt = inboundStatus.buffer.subarray(offset, offset + encryptConfig.saltLen);
 							const lengthCipher = inboundStatus.buffer.subarray(offset + encryptConfig.saltLen, initMinLength);
 							const masterKey = await getInboundMasterKeyTask(encryptConfig);
-							const decryptKey = await SSDerive session key(encryptConfig, masterKey, salt, ['decrypt']);
+							const decryptKey = await ssDeriveSessionKey(encryptConfig, masterKey, salt, ['decrypt']);
 							const nonceCounter = new Uint8Array(SSNoncelength);
 							try {
 								const lengthPlain = await SSAEADdecrypt(decryptKey, nonceCounter, lengthCipher);
@@ -1191,9 +1188,9 @@ async function handleWsRequest(request, yourUUID, url) {
 					if (outboundEncryptor) return outboundEncryptor;
 					if (!inboundStatus.encryptConfig) throw new Error('SS cipher is not negotiated');
 					const outboundEncryptConfig = inboundStatus.encryptConfig;
-					const outboundMasterKey = await SSDerive master key(yourUUID, outboundEncryptConfig.keyLen);
+					const outboundMasterKey = await ssDeriveMasterKey(yourUUID, outboundEncryptConfig.keyLen);
 					const outboundRandomBytes = crypto.getRandomValues(new Uint8Array(outboundEncryptConfig.saltLen));
-					const outboundEncryptKey = await SSDerive session key(outboundEncryptConfig, outboundMasterKey, outboundRandomBytes, ['encrypt']);
+					const outboundEncryptKey = await ssDeriveSessionKey(outboundEncryptConfig, outboundMasterKey, outboundRandomBytes, ['encrypt']);
 					const outboundNonceCounter = new Uint8Array(SSNoncelength);
 					let randomBytesSent = false;
 					outboundEncryptor = {
@@ -1608,11 +1605,11 @@ async function forwardTrojanUdpData(chunk, webSocket, context) {
 	if (context) context.cache = input.slice(cursor);
 }
 
-function SSIncrement nonce counter(counter) {
+function ssIncrementNonceCounter(counter) {
 	for (let i = 0; i < counter.length; i++) { counter[i] = (counter[i] + 1) & 0xff; if (counter[i] !== 0) return }
 }
 
-async function SSDerive master key(passwordText, keyLen) {
+async function ssDeriveMasterKey(passwordText, keyLen) {
 	const cacheKey = `${keyLen}:${passwordText}`;
 	if (SSmasterKeyCache.has(cacheKey)) return SSmasterKeyCache.get(cacheKey);
 	const deriveTask = (async () => {
@@ -1631,7 +1628,7 @@ async function SSDerive master key(passwordText, keyLen) {
 	catch (error) { SSmasterKeyCache.delete(cacheKey); throw error }
 }
 
-async function SSDerive session key(config, masterKey, salt, usages) {
+async function ssDeriveSessionKey(config, masterKey, salt, usages) {
 	const hmacOpts = { name: 'HMAC', hash: 'SHA-1' };
 	const saltHmacKey = await crypto.subtle.importKey('raw', salt, hmacOpts, false, ['sign']);
 	const prk = new Uint8Array(await crypto.subtle.sign('HMAC', saltHmacKey, masterKey));
@@ -1651,14 +1648,14 @@ async function SSDerive session key(config, masterKey, salt, usages) {
 async function SSAEADencrypt(cryptoKey, nonceCounter, plaintext) {
 	const iv = nonceCounter.slice();
 	const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, tagLength: 128 }, cryptoKey, plaintext);
-	SSIncrement nonce counter(nonceCounter);
+	ssIncrementNonceCounter(nonceCounter);
 	return new Uint8Array(ct);
 }
 
 async function SSAEADdecrypt(cryptoKey, nonceCounter, ciphertext) {
 	const iv = nonceCounter.slice();
 	const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv, tagLength: 128 }, cryptoKey, ciphertext);
-	SSIncrement nonce counter(nonceCounter);
+	ssIncrementNonceCounter(nonceCounter);
 	return new Uint8Array(pt);
 }
 
@@ -2970,7 +2967,7 @@ function ClashSubscriptionConfigHotPatch(Clash_rawSubContent, config_JSON = {}) 
 		return nodeText.replace(/\}(\s*)$/, `, grpc-opts: {grpc-user-agent: ${gRPCUserAgentYAML}}}$1`);
 	};
 	const addBlockFormatGrpcUserAgent = (nodeLines, topLevelIndent) => {
-		const topLevelIndent = ' '.repeat(topLevelIndent);
+		const topIndentStr = ' '.repeat(topLevelIndent);
 		let grpcOptsIndex = -1;
 		for (let idx = 0; idx < nodeLines.length; idx++) {
 			const line = nodeLines[idx];
@@ -2990,7 +2987,7 @@ function ClashSubscriptionConfigHotPatch(Clash_rawSubContent, config_JSON = {}) 
 					break;
 				}
 			}
-			if (insertIndex >= 0) nodeLines.splice(insertIndex + 1, 0, `${topLevelIndent}grpc-opts:`, `${topLevelIndent}  grpc-user-agent: ${gRPCUserAgentYAML}`);
+			if (insertIndex >= 0) nodeLines.splice(insertIndex + 1, 0, `${topIndentStr}grpc-opts:`, `${topIndentStr}  grpc-user-agent: ${gRPCUserAgentYAML}`);
 			return nodeLines;
 		}
 		const grpcLine = nodeLines[grpcOptsIndex];
